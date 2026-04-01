@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
-from generated.helios.transport import HandshakeRequest, HandshakeResponse
+from generated.helios.transport import (
+    Event,
+    EventPublish,
+    HandshakeRequest,
+    HandshakeResponse,
+    TransportMessage,
+)
 
 from helios.errors import ConnectionError as HeliosConnectionError
 from helios.errors import HandshakeError
@@ -53,6 +59,39 @@ class HeliosClient:
 
     async def _reset_connection(self) -> None:
         await self._transport.reset()
+
+    async def publish_event(
+        self,
+        *,
+        address: str,
+        event_type: str,
+        data: bytes,
+        event_id: int = 0,
+        request_id: str | None = None,
+    ) -> None:
+        if not self._transport.is_connected:
+            raise HeliosConnectionError("not connected")
+
+        event = Event(
+            id=event_id,
+            event_type=event_type,
+            source_address=self._node_uri,
+            data=data,
+        )
+        publish = EventPublish(
+            address=address,
+            event_type=event_type,
+            event=event,
+            request_id=request_id,
+        )
+        message = TransportMessage(event_publish=publish)
+
+        try:
+            await self._transport.write_framed_payload(
+                message.SerializeToString()
+            )
+        except Exception as e:
+            raise HeliosConnectionError("failed to publish event") from e
 
     async def connect(self) -> None:
         if self._transport.is_connected:

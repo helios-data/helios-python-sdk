@@ -72,10 +72,31 @@ class HeliosClient:
                     "subscription_response",
                     self._subscription_manager.handle_incoming,
                 )
+                self._transport.register_message_callback(
+                    "event_error",
+                    self._handle_event_error,
+                )
 
         except Exception as e:
             await self._reset_connection()
             raise e
+
+    def _handle_event_error(self, message: TransportMessage) -> None:
+        err = message.event_error
+        if err is None:
+            return
+        code_val = err.error_code
+        code = getattr(code_val, "name", str(code_val))
+        rid = err.request_id if err.request_id else None
+        logger.warning(
+            "Helios EventError: address=%r event_type=%r error_code=%s message=%r "
+            "request_id=%r",
+            err.address,
+            err.event_type,
+            code,
+            err.message,
+            rid,
+        )
 
     async def _perform_handshake(self) -> bool:
         # Create handshake request

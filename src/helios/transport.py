@@ -64,16 +64,16 @@ class HeliosTransport:
         while self._reader is not None:
             try:
                 message = await self.read_payload()
-                for callback in self._message_callbacks.values():
+                for callback_name, callback in self._message_callbacks.items():
                     try:
                         callback(message)
                     except Exception as e:
-                        logger.error(f"Error in message callback: {e}")
+                        logger.error(f"Error in message callback {callback_name}: {e}")
                     continue
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"Error in reader task: {e}")
+                logger.error(f"Error in reader task {self._reader_task}: {e}")
         logger.info("Helios transport reader task stopped!")
 
     async def _run_writer_task(self) -> None:
@@ -84,7 +84,7 @@ class HeliosTransport:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"Error in writer task: {e}")
+                logger.error(f"Error in writer task {self._writer_task}: {e}")
         logger.info("Helios transport writer task stopped!")
 
     def register_message_callback(self, message_type: str, callback: Callable[[TransportMessage], None]) -> None:
@@ -93,7 +93,7 @@ class HeliosTransport:
 
     def unregister_message_callback(self, message_type: str) -> None:
         """Unregisters a callback for a specific message type."""
-        del self._message_callbacks[message_type]
+        self._message_callbacks.pop(message_type, None)
 
     async def disconnect(self) -> None:
         """Disconnects from the Helios transport layer."""

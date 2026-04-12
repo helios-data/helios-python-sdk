@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 import struct
 
+from generated.helios.transport import TransportMessage
+
 from helios.errors import ConnectionError as HeliosConnectionError
 
 
@@ -43,7 +45,8 @@ class HeliosTransport:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
 
-    async def write_framed_payload(self, payload: bytes) -> None:
+    async def write_payload(self, message: TransportMessage) -> None:
+        payload = message.SerializeToString()
         if len(payload) > self.MAX_FRAME_BYTES:
             raise HeliosConnectionError("message too large to send")
         if self._writer is None:
@@ -51,7 +54,7 @@ class HeliosTransport:
         self._writer.write(struct.pack("!I", len(payload)) + payload)
         await self._writer.drain()
 
-    async def read_framed_payload(self) -> bytes:
+    async def read_payload(self) -> TransportMessage:
         if self._reader is None:
             raise HeliosConnectionError("not connected")
         header = await self._reader.readexactly(4)
@@ -60,4 +63,5 @@ class HeliosTransport:
             raise HeliosConnectionError(f"frame too large: {size} bytes")
         if size == 0:
             raise HeliosConnectionError("empty frame")
-        return await self._reader.readexactly(size)
+        raw = await self._reader.readexactly(size)
+        return TransportMessage.parse(raw)

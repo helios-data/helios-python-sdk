@@ -6,7 +6,6 @@ from generated.helios.transport import (
     Event,
     EventPublish,
     HandshakeRequest,
-    HandshakeResponse,
     TransportMessage,
 )
 
@@ -36,19 +35,21 @@ class HeliosClient:
             client_address=self._node_uri,
             require_expected=self._require_expected,
         )
-
+        outgoing = TransportMessage(handshake_request=request)
         try:
-            await self._transport.write_framed_payload(
-                request.SerializeToString()
-            )
-            raw_handshake_response = await self._transport.read_framed_payload()
+            await self._transport.write_payload(outgoing)
+            envelope = await self._transport.read_payload()
         except asyncio.IncompleteReadError as e:
             raise HeliosConnectionError("connection closed during handshake") from e
-
-        try:
-            response = HandshakeResponse.parse(raw_handshake_response)
         except (TypeError, ValueError) as e:
             raise HandshakeError(f"invalid handshake response: {e}") from e
+
+        response = envelope.handshake_response
+        if response is None:
+            raise HandshakeError(
+                "invalid handshake response: expected handshake_response in "
+                "TransportMessage"
+            )
 
         if response.version != HeliosTransport.PROTOCOL_VERSION:
             raise HandshakeError(
@@ -87,9 +88,7 @@ class HeliosClient:
         message = TransportMessage(event_publish=publish)
 
         try:
-            await self._transport.write_framed_payload(
-                message.SerializeToString()
-            )
+            await self._transport.write_payload(message)
         except Exception as e:
             raise HeliosConnectionError("failed to publish event") from e
 

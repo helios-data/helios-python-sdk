@@ -1,23 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 
 from generated.helios.transport import (
     Event,
     EventPublish,
-    HandshakeRequest,
     EventRequest,
+    EventSubscribe,
+    EventUnsubscribe,
+    HandshakeRequest,
     TransportMessage,
 )
 
 from helios.errors import ConnectionError as HeliosConnectionError
 from helios.errors import HandshakeError
+from helios.request import RequestManager
+from helios.subscription import SubscriptionManager
 from helios.transport import HeliosTransport
 
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class HeliosClient:
     """Async TCP client for the Helios transport protocol."""
@@ -37,8 +43,10 @@ class HeliosClient:
         self._async_publish = async_publish
         self._use_background_io = use_background_io
         self._sequence_number = 0
-        self._pending_requests: dict[str, asyncio.Future[Event]] = {}
+        self._request_manager = RequestManager()
+        self._subscription_manager = SubscriptionManager()
         self._transport = HeliosTransport(core_address, core_port)
+        self._get_event_reply_consumed = False
 
     async def connect(self) -> None:
         """Connects to the Helios transport layer, and performs the handshake with the Helios core."""
@@ -58,7 +66,11 @@ class HeliosClient:
                 # Register message callbacks
                 self._transport.register_message_callback(
                     "request_response",
-                    self._handle_request_response,
+                    self._request_manager.handle_incoming,
+                )
+                self._transport.register_message_callback(
+                    "subscription_response",
+                    self._subscription_manager.handle_incoming,
                 )
 
         except Exception as e:
@@ -98,16 +110,15 @@ class HeliosClient:
             )
         return True
 
-    def _handle_request_response(self, message: TransportMessage) -> None:
-        """Captures incoming request/response messages from Helios, and sets the result of the pending request."""
-        if message.event_publish is not None:
-            pub = message.event_publish
-            rid = pub.request_id
-            if rid is not None and rid in self._pending_requests:
-                self._pending_requests[rid].set_result(pub.event)
-                del self._pending_requests[rid]
+    async def _send_outgoing(self, message: TransportMessage) -> None:
+        if self._async_publish and self._use_background_io:
+            await self._transport.enqueue_outgoing(message)
+        else:
+            await self._transport.write_payload(message)
 
     async def _reset_connection(self) -> None:
+        self._subscription_manager.close_all()
+        self._request_manager.clear_all()
         await self._transport.reset()
 
     async def publish_event(
@@ -118,7 +129,7 @@ class HeliosClient:
         data: bytes,
         event_id: int | None = None
     ) -> None:
-        """Publishes an event to the Helios transport layer.
+        """Publishes an event to Helios.
 
         Args:
             address: The address of the event to publish to.
@@ -145,13 +156,10 @@ class HeliosClient:
         )
         message = TransportMessage(event_publish=publish)
 
-        if self._async_publish and self._use_background_io:
-            await self._transport.enqueue_outgoing(message)
-        else:
-            try:
-                await self._transport.write_payload(message)
-            except Exception as e:
-                raise HeliosConnectionError("Failed to publish event: Failed to write payload") from e
+        try:
+            await self._send_outgoing(message)
+        except Exception as e:
+            raise HeliosConnectionError("Failed to publish event: Failed to write payload") from e
 
     async def get_event(
         self,
@@ -159,7 +167,9 @@ class HeliosClient:
         address: str,
         event_type: str
     ) -> Event:
-        """Gets an event from the Helios transport layer.
+        """Gets an event from Helios.
+
+        Requires use_background_io=True.
 
         Args:
             address: The address of the event to get.
@@ -170,14 +180,10 @@ class HeliosClient:
         """
         if not self._transport.is_connected:
             raise HeliosConnectionError("Failed to get event: Not connected to Helios")
+        if not self._use_background_io:
+            raise HeliosConnectionError("get_event requires use_background_io=True so incoming publishes are read")
 
-        # Generate a random request ID
-        request_id = str(uuid.uuid4())
-
-        # Create a future to hold the result of the request,
-        # which will be resolved when the event is received from the Helios transport layer.
-        pending_future: asyncio.Future[Event] = asyncio.Future()
-        self._pending_requests[request_id] = pending_future
+        request_id, pending_future = self._request_manager.create_event()
         message = TransportMessage(
             event_request=EventRequest(
                 address=address,
@@ -185,11 +191,67 @@ class HeliosClient:
                 request_id=request_id,
             )
         )
-        if self._async_publish and self._use_background_io:
-            await self._transport.enqueue_outgoing(message)
-        else:
-            await self._transport.write_payload(message)
+        await self._send_outgoing(message)
         return await pending_future
 
+    @asynccontextmanager
+    async def subscribe_event(
+        self,
+        *,
+        address: str,
+        event_type: str,
+        queue_maxlen: int | None = None,
+    ) -> AsyncGenerator[AsyncIterator[Event], None]:
+        """Subscribe to event updates from Helios.
+
+        Requires use_background_io=True.
+
+        Args:
+            address: The address of the event to subscribe to.
+            event_type: The type of the event to subscribe to.
+            queue_maxlen: None — unbounded backlog. 0 — keep only the latest undelivered
+                event. >= 1 — at most that many pending events (oldest dropped when full).
+
+        Usage::
+
+            async with client.subscribe_event(address=..., event_type=...) as subscription:
+                async for event in subscription:
+                    print(event)
+        """
+        if not self._transport.is_connected:
+            raise HeliosConnectionError("Failed to subscribe: Not connected to Helios")
+        if not self._use_background_io:
+            raise HeliosConnectionError("subscribe_event requires use_background_io=True so incoming publishes are read")
+        if queue_maxlen is not None and queue_maxlen < 0:
+            raise ValueError("queue_maxlen must be None or >= 0")
+
+        subscription_id, sub = self._subscription_manager.create_subscription(queue_maxlen=queue_maxlen)
+        subscribe_msg = TransportMessage(
+            event_subscribe=EventSubscribe(
+                address=address,
+                event_type=event_type,
+                subscription_id=subscription_id,
+            ),
+        )
+        try:
+            await self._send_outgoing(subscribe_msg)
+            yield sub.events()
+        finally:
+            self._subscription_manager.remove_subscription(subscription_id)
+            try:
+                sub.close()
+            except Exception:
+                pass
+            if self._transport.is_connected:
+                unsubscribe_msg = TransportMessage(
+                    event_unsubscribe=EventUnsubscribe(subscription_id=subscription_id),
+                )
+                try:
+                    await self._send_outgoing(unsubscribe_msg)
+                except Exception as e:
+                    logger.warning("EventUnsubscribe failed: %s", e)
+
     async def disconnect(self) -> None:
+        self._request_manager.clear_all()
+        self._subscription_manager.close_all()
         await self._transport.disconnect()

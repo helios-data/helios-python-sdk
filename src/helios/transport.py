@@ -5,7 +5,7 @@ import contextlib
 import struct
 from typing import Callable
 
-from generated.helios.transport import TransportMessage
+from .generated.helios.transport import TransportMessage
 
 from helios.errors import ConnectionError as HeliosConnectionError
 

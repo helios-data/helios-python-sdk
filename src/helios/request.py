@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from generated.helios.transport import Event, TransportMessage
+from .generated.helios.transport import Event, TransportMessage
 
 
 class RequestManager:

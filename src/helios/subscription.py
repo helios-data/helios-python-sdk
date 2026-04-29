@@ -8,7 +8,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 
-from generated.helios.transport import Event, TransportMessage
+from .generated.helios.transport import Event, TransportMessage
 
 logger = logging.getLogger(__name__)
 

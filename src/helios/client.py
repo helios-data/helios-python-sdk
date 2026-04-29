@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 
-from generated.helios.transport import (
+from .generated.helios.transport import (
     Event,
     EventPublish,
     EventRequest,

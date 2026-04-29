@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=65.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "betterproto2-compiler>=0.9.0", "grpcio-tools"]
+build-backend = "hatchling.build"
 
 [project]
 name = "helios-python-sdk"
@@ -8,11 +8,15 @@ version = "0.1.0"
 description = "Python SDK for Helios"
 requires-python = ">=3.10"
 dependencies = [
-    "betterproto2-compiler>=0.9.0",
     "betterproto2[all]>=0.9.1",
     "websockets>=15.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["helios", "generated*"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/helios"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "scripts/hatch_build.py"
+
+[tool.hatch.build.targets.editable.hooks.custom]
+path = "scripts/hatch_build.py"

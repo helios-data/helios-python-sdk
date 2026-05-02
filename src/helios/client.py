@@ -145,34 +145,35 @@ class HeliosClient:
     async def publish_event(
         self,
         *,
-        address: str,
-        event_type: str,
+        event_name: str,
         data: bytes,
-        event_id: int | None = None
+        event_id: int | None = None,
+        override_address: str | None = None,
     ) -> None:
         """Publishes an event to Helios.
 
         Args:
-            address: The address of the event to publish to.
-            event_type: The type of the event to publish.
+            event_name: The name of the event to publish.
             data: The data of the event to publish.
             event_id: The ID of the event to publish. If not provided, a new sequence number will be generated.
+            override_address: Publish using this address instead of the client's node URI.
         """
         if not self._transport.is_connected:
             raise HeliosConnectionError("Failed to publish event: Not connected to Helios")
 
         event_id = event_id if event_id is not None else self._sequence_number
         self._sequence_number += 1
+        address = override_address if override_address is not None else self._node_uri
 
         event = Event(
             id=event_id,
-            event_type=event_type,
+            event_name=event_name,
             source_address=self._node_uri,
             data=data,
         )
         publish = EventPublish(
             address=address,
-            event_type=event_type,
+            event_name=event_name,
             event=event
         )
         message = TransportMessage(event_publish=publish)
@@ -186,7 +187,7 @@ class HeliosClient:
         self,
         *,
         address: str,
-        event_type: str
+        event_name: str
     ) -> Event:
         """Gets an event from Helios.
 
@@ -194,7 +195,7 @@ class HeliosClient:
 
         Args:
             address: The address of the event to get.
-            event_type: The type of the event to get.
+            event_name: The name of the event to get.
 
         Returns:
             A future that will be resolved with the event that was received from the Helios transport layer.
@@ -208,7 +209,7 @@ class HeliosClient:
         message = TransportMessage(
             event_request=EventRequest(
                 address=address,
-                event_type=event_type,
+                event_name=event_name,
                 request_id=request_id,
             )
         )
@@ -220,7 +221,7 @@ class HeliosClient:
         self,
         *,
         address: str,
-        event_type: str,
+        event_name: str,
         queue_maxlen: int | None = None,
     ) -> AsyncGenerator[AsyncIterator[Event], None]:
         """Subscribe to event updates from Helios.
@@ -229,13 +230,13 @@ class HeliosClient:
 
         Args:
             address: The address of the event to subscribe to.
-            event_type: The type of the event to subscribe to.
+            event_name: The name of the event to subscribe to.
             queue_maxlen: None — unbounded backlog. 0 — keep only the latest undelivered
                 event. >= 1 — at most that many pending events (oldest dropped when full).
 
         Usage::
 
-            async with client.subscribe_event(address=..., event_type=...) as subscription:
+            async with client.subscribe_event(address=..., event_name=...) as subscription:
                 async for event in subscription:
                     print(event)
         """
@@ -250,7 +251,7 @@ class HeliosClient:
         subscribe_msg = TransportMessage(
             event_subscribe=EventSubscribe(
                 address=address,
-                event_type=event_type,
+                event_name=event_name,
                 subscription_id=subscription_id,
             ),
         )

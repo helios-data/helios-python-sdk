@@ -78,7 +78,7 @@ class SubscriptionManager:
         if message.event_publish is None:
             return
         pub = message.event_publish
-        sid = (pub.subscription_id or "").strip()
+        sid = (pub.request_id or "").strip()
         if not sid:
             return
         sub = self._subscriptions.get(sid)

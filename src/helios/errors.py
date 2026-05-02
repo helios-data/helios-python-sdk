@@ -21,13 +21,13 @@ class EventError(HeliosError):
     def __init__(
         self,
         address: str,
-        event_type: str,
+        event_name: str,
         error_code: int,
         message: str,
         request_id: str | None = None,
     ) -> None:
         self.address = address
-        self.event_type = event_type
+        self.event_name = event_name
         self.error_code = error_code
         self.request_id = request_id
         super().__init__(message)

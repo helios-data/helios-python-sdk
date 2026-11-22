@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 import os
 
-# Only if you have the config.py setup with a Config(BaseModel) class in your project root folder
+# Only if you have the helios_pydantic_config.py setup with a Config(BaseModel) class in your project root folder
 # You can load the config by passing in your Config class via:
 # config = load_pydantic_config(Config)
 def load_pydantic_config[T: BaseModel](config_class: type[T]) -> T:
